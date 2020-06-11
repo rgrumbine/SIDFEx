@@ -6,12 +6,12 @@ sidfex.consensus <- function (TargetID = "POLARSTERN01",
                                                     "nrl001_gofs3.1-shortrange",
                                                     "eccc001_giops",
                                                     "esrl001_SeaIceVelocity",
-                                                    "metno001_RK2",
-                                                    "ncep001_freedrift-ensmean",
-                                                    "dmi001_Forecast5d"),
+                                                    "metno001_RK2"),
+                                                    #"ncep001_freedrift-ensmean",
+                                                    #"dmi001_Forecast5d"),
                               shortterm.age.max = 3,
                               shortterm.remainrange.min = 3,
-                              shortterm.replicate.max = 13,
+                              shortterm.replicate.max = 17,
                               #subseas.replicate.max = 6,
                               leadtimes = seq(0,124),
                               submitted.within = Inf,
@@ -78,13 +78,37 @@ sidfex.consensus <- function (TargetID = "POLARSTERN01",
   indx.seas = indx[indx$EnsParentFile == indx.po.seas$File, ]
   N.em = nrow(indx.seas)
   fcst.seas = sidfex.read.fcst(files = indx.seas, ens.merge = TRUE, data.path = data.path.fcst)
+
+  for (i in 1:N.em) {
+    lon.col = 5 + 2*i
+    lat.col = lon.col - 1
+    lat.dat = fcst.seas$res.list[[1]]$data[,lat.col]
+    lon.dat = fcst.seas$res.list[[1]]$data[,lon.col]
+    if (anyNA(lat.dat) | anyNA(lon.dat)) {
+      warning(paste0("NAs contained in ensemble member ",i," of the ecmwf_SEAS5 forecast, repeating last valid position"))
+      first.na = min(which(is.na(lat.dat) | is.na(lon.dat)))
+      Nstp = length(lat.dat)
+      if (first.na == 1) {
+        if (is.na(fcst.seas$res.list[[1]]$InitLat) || is.na(fcst.seas$res.list[[1]]$InitLon)) {
+          stop("no valid initial location found to fill NA-only ensemble members")
+        }
+        lat.dat = rep(fcst.seas$res.list[[1]]$InitLat,Nstp)
+        lon.dat = rep(fcst.seas$res.list[[1]]$InitLon,Nstp)
+      } else {
+        lat.dat[first.na:Nstp] = lat.dat[first.na-1]
+        lon.dat[first.na:Nstp] = lon.dat[first.na-1]
+      }
+      fcst.seas$res.list[[1]]$data[,lat.col] = lat.dat
+      fcst.seas$res.list[[1]]$data[,lon.col] = lon.dat
+    }
+  }
+
   fcst.seas.em.template = fcst.seas
   fcst.seas.em.template$res.list[[1]]$data = fcst.seas.em.template$res.list[[1]]$data[,1:5]
   fcst.seas.rot = sidfex.rot.fcst(obs = obs, fcst = fcst.seas, obsref.Year = init.year, obsref.DayOfYear = init.doy)
   fcst.seas.remaptime = sidfex.remaptime.fcst(fcst = fcst.seas.rot,
                                               newtime.DaysLeadTime = leadtimes - reltime.fcst.init.seas,
                                               extrapolate=TRUE, extrapolate.maxspeed = extrapolate.maxspeed)
-
   fcst.cons = fcst.seas.remaptime
   fcst.cons.data = fcst.seas.remaptime$res.list[[1]]$data
   fcst.cons.data$DaysLeadTime = leadtimes
@@ -124,6 +148,11 @@ sidfex.consensus <- function (TargetID = "POLARSTERN01",
       next
     }
     ### here one might read the forecast already once to check for NAs and, if NAs are included, omit the forecast...
+    fcst.st.test = sidfex.read.fcst(files = indx.st, ens.merge = TRUE, data.path = data.path.fcst)
+    if (anyNA(fcst.st.test$res.list[[1]]$data)) {
+      if (verbose) {print(paste0("latest ",gm," forecast contains NA value(s)"))}
+      next
+    }
     N.st = N.st + 1
     reltime.fcst.init.st.list[[N.st]] = reltime.fcst.init.st
     indx.st.list[[N.st]] = indx.st
@@ -200,7 +229,7 @@ sidfex.consensus <- function (TargetID = "POLARSTERN01",
   fcst.cons$res.list[[1]]$InitYear = init.year
   fcst.cons$res.list[[1]]$InitDayOfYear = init.doy
   obs.init.fcst = sidfex.remaptime.fcst(fcst = fcst.seas.em.template, newtime.DaysLeadTime = -reltime.fcst.init.seas, extrapolate=FALSE)
-  obs.init = sidfex.remaptime.obs2fcst(fcst = obs.init.fcst, obs = obs)
+  obs.init = sidfex.remaptime.obs2fcst(fcst = obs.init.fcst, obs = obs, extrapolate = TRUE, method = "linear")
   fcst.cons$res.list[[1]]$InitLat = obs.init$res.list[[1]]$data$Lat[1]
   fcst.cons$res.list[[1]]$InitLon = obs.init$res.list[[1]]$data$Lon[1]
   fcst.cons$res.list[[1]]$Ntimesteps = nrow(fcst.cons$res.list[[1]]$data)
@@ -216,7 +245,7 @@ sidfex.consensus <- function (TargetID = "POLARSTERN01",
   fcst.cons$res.list[[1]]$MergedInitLon = rep(obs.init$res.list[[1]]$data$Lon[1], N.em+1)
 
   consensus.info = list()
-  consensus.info$Version = "20191118v0"
+  consensus.info$Version = "20200221v0"
   consensus.info$GeneratedYear = now.year
   consensus.info$GeneratedDayOfYear = now.doy
   consensus.info$arguments = list()
